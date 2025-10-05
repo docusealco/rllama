@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'ffi'
 
 module Rllama
@@ -417,7 +419,8 @@ module Rllama
 
     # Context creation
     attach_function :llama_init_from_model, [:llama_model_p, LlamaContextParams.by_value], :llama_context_p
-    attach_function :llama_new_context_with_model, [:llama_model_p, LlamaContextParams.by_value], :llama_context_p # DEPRECATED
+    # DEPRECATED
+    attach_function :llama_new_context_with_model, [:llama_model_p, LlamaContextParams.by_value], :llama_context_p
     attach_function :llama_free, [:llama_context_p], :void
 
     # System info and support checks
@@ -509,8 +512,10 @@ module Rllama
     attach_function :llama_state_seq_save_file, %i[llama_context_p string llama_seq_id pointer size_t], :size_t
     attach_function :llama_state_seq_load_file, %i[llama_context_p string llama_seq_id pointer size_t pointer], :size_t
     attach_function :llama_state_seq_get_size_ext, %i[llama_context_p llama_seq_id llama_state_seq_flags], :size_t
-    attach_function :llama_state_seq_get_data_ext, %i[llama_context_p pointer size_t llama_seq_id llama_state_seq_flags], :size_t
-    attach_function :llama_state_seq_set_data_ext, %i[llama_context_p pointer size_t llama_seq_id llama_state_seq_flags], :size_t
+    attach_function :llama_state_seq_get_data_ext,
+                    %i[llama_context_p pointer size_t llama_seq_id llama_state_seq_flags], :size_t
+    attach_function :llama_state_seq_set_data_ext,
+                    %i[llama_context_p pointer size_t llama_seq_id llama_state_seq_flags], :size_t
 
     # Decoding
     attach_function :llama_batch_get_one, %i[pointer int32], LlamaBatch.by_value
@@ -599,9 +604,11 @@ module Rllama
     attach_function :llama_sampler_init_mirostat, %i[int32 uint32 float float int32], :llama_sampler_p
     attach_function :llama_sampler_init_mirostat_v2, %i[uint32 float float], :llama_sampler_p
     attach_function :llama_sampler_init_grammar, %i[llama_vocab_p string string], :llama_sampler_p
-    attach_function :llama_sampler_init_grammar_lazy_patterns, %i[llama_vocab_p string string pointer size_t pointer size_t], :llama_sampler_p
+    attach_function :llama_sampler_init_grammar_lazy_patterns,
+                    %i[llama_vocab_p string string pointer size_t pointer size_t], :llama_sampler_p
     attach_function :llama_sampler_init_penalties, %i[int32 float float float], :llama_sampler_p
-    attach_function :llama_sampler_init_dry, %i[llama_vocab_p int32 float float int32 int32 pointer size_t], :llama_sampler_p
+    attach_function :llama_sampler_init_dry, %i[llama_vocab_p int32 float float int32 int32 pointer size_t],
+                    :llama_sampler_p
     attach_function :llama_sampler_init_logit_bias, %i[int32 int32 pointer], :llama_sampler_p
     attach_function :llama_sampler_init_infill, [:llama_vocab_p], :llama_sampler_p
     attach_function :llama_sampler_get_seed, [:llama_sampler_p], :uint32

@@ -1,15 +1,19 @@
+# frozen_string_literal: true
+
 module Rllama
   class Model
-    DEFAULT_CONTEXT_LENGTH = 2 ** 13
+    DEFAULT_CONTEXT_LENGTH = 2**13
 
     attr_reader :pointer
 
-    def initialize(path)
+    def initialize(path_or_name, dir: nil)
+      resolved_path = Loader.resolve(path_or_name, dir:)
+
       model_params = Cpp.llama_model_default_params
 
-      @pointer = Cpp.llama_model_load_from_file(path, model_params)
+      @pointer = Cpp.llama_model_load_from_file(resolved_path, model_params)
 
-      raise Error, "Unable to load model from #{path}" if @pointer.null?
+      raise Error, "Unable to load model from #{resolved_path}" if @pointer.null?
     end
 
     def chat_template
@@ -25,18 +29,19 @@ module Rllama
     end
 
     def n_seq_max
-      @llama_max_parallel_sequences ||= Cpp.llama_max_parallel_sequences
+      @n_seq_max ||= Cpp.llama_max_parallel_sequences
     end
 
     def n_ctx_train
       @n_ctx_train ||= Cpp.llama_model_n_ctx_train(@pointer)
     end
 
-    def generate(prompt, max_tokens: DEFAULT_CONTEXT_LENGTH, temperature: 0.8, top_k: 40, top_p: 0.95, min_p: 0.05, seed: nil, system: nil, &block)
+    def generate(prompt, max_tokens: DEFAULT_CONTEXT_LENGTH, temperature: 0.8, top_k: 40, top_p: 0.95, min_p: 0.05,
+                 seed: nil, system: nil, &block)
       init_context(n_ctx: max_tokens) do |ctx|
         ctx.generate(prompt, max_tokens: ctx.n_ctx,
                              temperature:, top_k:, top_p:, seed:, system:, min_p:,
-                             &block)
+                     &block)
       end
     end
     alias message generate
@@ -65,8 +70,8 @@ module Rllama
       context
     end
 
-    def init_embedding_context(n_ctx: 2048, n_batch: 512, &block)
-      init_context(embeddings: true, n_ctx:, n_batch:, &block)
+    def init_embedding_context(n_ctx: 2048, n_batch: 512, &)
+      init_context(embeddings: true, n_ctx:, n_batch:, &)
     end
 
     def build_chat_template(messages)
@@ -85,12 +90,12 @@ module Rllama
 
       needed = Cpp.llama_chat_apply_template(chat_template, array_ptr, count, true, nil, 0)
 
-      raise Error, 'Failed to apply chat template' if needed < 0
+      raise Error, 'Failed to apply chat template' if needed.negative?
 
       buf = FFI::MemoryPointer.new(:char, needed)
       written = Cpp.llama_chat_apply_template(chat_template, array_ptr, count, true, buf, needed)
 
-      raise Error, 'Failed to apply chat template' if written < 0
+      raise Error, 'Failed to apply chat template' if written.negative?
 
       buf.read_string(written)
     end

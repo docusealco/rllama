@@ -1,5 +1,8 @@
+# frozen_string_literal: true
+
 module Rllama
   autoload :Model, 'rllama/model'
+  autoload :Loader, 'rllama/loader'
   autoload :Context, 'rllama/context'
   autoload :Cpp, 'rllama/cpp'
   autoload :VERSION, 'rllama/version'
@@ -9,12 +12,12 @@ module Rllama
 
   module_function
 
-  def load_model(path_or_name)
-    model = Model.new(path_or_name)
+  def load_model(path_or_name, dir: nil)
+    model = Model.new(path_or_name, dir:)
 
     if block_given?
       begin
-        return yield model
+        yield model
       ensure
         model.close
       end

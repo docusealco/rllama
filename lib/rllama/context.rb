@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Rllama
   class Context
     attr_reader :messages, :n_ctx, :n_batch, :n_past
@@ -26,10 +28,9 @@ module Rllama
       @messages = []
     end
 
-    def generate(message, role: 'user', max_tokens: @n_ctx, temperature: 0.8, top_k: 40, top_p: 0.95, min_p: 0.05, seed: nil, system: nil)
-      if system && @messages.empty?
-        @messages << { role: 'system', content: system }
-      end
+    def generate(message, role: 'user', max_tokens: @n_ctx, temperature: 0.8, top_k: 40, top_p: 0.95, min_p: 0.05,
+                 seed: nil, system: nil)
+      @messages << { role: 'system', content: system } if system && @messages.empty?
 
       if message.is_a?(Array)
         @messages.push(*message)
@@ -43,16 +44,17 @@ module Rllama
 
       n_prompt_tokens = -Cpp.llama_tokenize(@model.vocab, prompt_string, prompt_string.bytesize, nil, 0, true, true)
 
-      raise Error, 'Prompt is too long.' if n_prompt_tokens < 0
+      raise Error, 'Prompt is too long.' if n_prompt_tokens.negative?
 
       prompt_tokens_ptr = FFI::MemoryPointer.new(:int32, n_prompt_tokens)
-      tokens_written = Cpp.llama_tokenize(@model.vocab, prompt_string, prompt_string.bytesize, prompt_tokens_ptr, n_prompt_tokens, true, true)
+      tokens_written = Cpp.llama_tokenize(@model.vocab, prompt_string, prompt_string.bytesize, prompt_tokens_ptr,
+                                          n_prompt_tokens, true, true)
 
-      raise Error, 'Failed to tokenize prompt.' if tokens_written < 0
+      raise Error, 'Failed to tokenize prompt.' if tokens_written.negative?
 
       new_token_count = tokens_written - @n_past
 
-      if new_token_count > 0
+      if new_token_count.positive?
         new_tokens_ptr = prompt_tokens_ptr + (@n_past * FFI.type_size(:int32))
 
         batch = Cpp.llama_batch_get_one(new_tokens_ptr, new_token_count)
@@ -66,11 +68,14 @@ module Rllama
       sampler_chain = Cpp.llama_sampler_chain_init(chain_params)
 
       Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_min_p(min_p, 1)) if min_p
-      Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_top_k(top_k)) if top_k && top_k > 0
+      Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_top_k(top_k)) if top_k&.positive?
       Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_top_p(top_p, 1)) if top_p && top_p < 1.0
-      Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_temp(temperature)) if temperature && temperature > 0
+      if temperature&.positive?
+        Cpp.llama_sampler_chain_add(sampler_chain,
+                                    Cpp.llama_sampler_init_temp(temperature))
+      end
 
-      is_probabilistic = (temperature && temperature > 0) || (top_k && top_k > 0) || (top_p && top_p < 1.0) || !min_p.nil?
+      is_probabilistic = temperature&.positive? || top_k&.positive? || (top_p && top_p < 1.0) || !min_p.nil?
       rng_seed = seed || (Random.new_seed & 0xFFFFFFFF)
 
       if is_probabilistic
@@ -120,7 +125,7 @@ module Rllama
 
       duration = end_time - start_time
 
-      tps = n_decoded > 0 && duration > 0 ? n_decoded / duration : 0
+      tps = n_decoded.positive? && duration.positive? ? n_decoded / duration : 0
 
       Cpp.llama_sampler_free(sampler_chain)
 
@@ -146,7 +151,7 @@ module Rllama
         tokens_ptr = FFI::MemoryPointer.new(:int32, max_tokens)
         count = Cpp.llama_tokenize(@model.vocab, text, text.bytesize, tokens_ptr, max_tokens, true, false)
 
-        raise Error, "Failed to tokenize text: '#{text}'" if count < 0
+        raise Error, "Failed to tokenize text: '#{text}'" if count.negative?
 
         tokens_ptr.read_array_of_int32(count)
       end
@@ -178,9 +183,9 @@ module Rllama
       end
 
       tokenized_strings.each do |tokens|
-        if !prompts_in_batch.empty? && ((current_batch_token_count + tokens.size) > batch_size || prompts_in_batch.size >= @model.n_seq_max)
-          process_batch.call
-        end
+        batch_full = (current_batch_token_count + tokens.size) > batch_size
+        seq_limit_reached = prompts_in_batch.size >= @model.n_seq_max
+        process_batch.call if !prompts_in_batch.empty? && (batch_full || seq_limit_reached)
 
         seq_id = prompts_in_batch.size
         prompts_in_batch << seq_id
