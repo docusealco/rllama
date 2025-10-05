@@ -10,3 +10,4 @@ lib/rllama/x64-mingw-ucrt/
 lib/rllama/x64-mingw32/
 lib/rllama/x86_64-darwin/
 lib/rllama/x86_64-linux/
+lib/rllama/aarch64-linux-musl/

@@ -1,0 +1,35 @@
+# Dockerfile for building llama.cpp on Alpine Linux ARM64 (musl-based)
+# Using Alpine for musl libc compatibility
+FROM alpine:latest
+
+# Install required dependencies
+RUN apk add --no-cache \
+    build-base \
+    git \
+    cmake \
+    patchelf \
+    linux-headers
+
+# Set working directory
+WORKDIR /workspace
+
+# Clone llama.cpp repository (shallow clone for faster build)
+RUN git clone --depth=1 https://github.com/ggml-org/llama.cpp
+
+# Build llama.cpp with BUILD_SHARED_LIBS=ON and set RPATH for library discovery
+WORKDIR /workspace/llama.cpp
+RUN cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLAMA_CURL=OFF \
+    -DBUILD_SHARED_LIBS=ON \
+    -DGGML_NATIVE=OFF \
+    -DCMAKE_INSTALL_RPATH='$ORIGIN' \
+    -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON && \
+    cmake --build build --config Release -j$(nproc)
+
+# Set RPATH on all shared libraries so they can find each other
+RUN find build -name "*.so*" -type f -exec patchelf --set-rpath '$ORIGIN' {} \; || true
+
+# The built files will be in /workspace/llama.cpp/build
+# We'll copy them out using docker cp command
+CMD ["echo", "Build complete. Built files are in /workspace/llama.cpp/build"]

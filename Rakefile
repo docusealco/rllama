@@ -18,6 +18,10 @@ PLATFORMS = {
     gem_platform: 'aarch64-linux-gnu',
     lib_extension: '.so'
   },
+  'aarch64-linux-musl' => {
+    gem_platform: 'aarch64-linux-musl',
+    lib_extension: '.so'
+  },
   'x86_64-darwin' => {
     gem_platform: 'x86_64-darwin',
     asset_name: 'llama-%<version>s-bin-macos-x64.zip',
@@ -86,11 +90,42 @@ namespace :llama do
     end
   end
 
+  desc 'Build ARM64 Linux musl binaries using Docker'
+  task :build_arm_musl do
+    puts 'Building llama.cpp Docker image for ARM64 musl...'
+    sh 'docker build -t llamacpp-builder-arm-musl -f Dockerfile.llamacpp-arm-musl .'
+
+    puts 'Creating container from image...'
+    container_id = `docker create llamacpp-builder-arm-musl`.strip
+    puts "Container ID: #{container_id}"
+
+    begin
+      puts 'Creating output directory...'
+      FileUtils.mkdir_p('build/linux-aarch64-musl')
+
+      puts 'Copying built files from container to build/linux-aarch64-musl...'
+      sh "docker cp #{container_id}:/workspace/llama.cpp/build/. build/linux-aarch64-musl/"
+
+      puts 'Build complete! Files are available in build/linux-aarch64-musl/'
+      sh 'ls -lh build/linux-aarch64-musl/'
+    ensure
+      puts 'Cleaning up container...'
+      sh "docker rm #{container_id}"
+    end
+  end
+
   desc 'Build ARM64 Linux and copy to lib directory'
   task build_and_install_arm: ['llama:build_arm'] do
     puts "\nCopying ARM64 binaries to lib directory..."
     download_llama_binary('aarch64-linux')
     puts 'ARM64 Linux binaries ready!'
+  end
+
+  desc 'Build ARM64 Linux musl and copy to lib directory'
+  task build_and_install_arm_musl: ['llama:build_arm_musl'] do
+    puts "\nCopying ARM64 musl binaries to lib directory..."
+    download_llama_binary('aarch64-linux-musl')
+    puts 'ARM64 Linux musl binaries ready!'
   end
 end
 
@@ -223,8 +258,8 @@ def download_llama_binary(platform)
   config = PLATFORMS[platform]
   raise ArgumentError, "Unknown platform: #{platform}" unless config
 
-  # Special case: use local build for aarch64-linux
-  if platform == 'aarch64-linux'
+  # Special case: use local build for aarch64-linux and aarch64-linux-musl
+  if platform == 'aarch64-linux' || platform == 'aarch64-linux-musl'
     copy_local_build(platform, config)
     return
   end
@@ -276,11 +311,20 @@ def download_llama_binary(platform)
 end
 
 def copy_local_build(platform, config)
-  local_build_dir = 'build/linux-aarch64'
+  # Determine the correct local build directory based on platform
+  local_build_dir = case platform
+                    when 'aarch64-linux'
+                      'build/linux-aarch64'
+                    when 'aarch64-linux-musl'
+                      'build/linux-aarch64-musl'
+                    else
+                      raise "Unsupported platform for local build: #{platform}"
+                    end
 
   unless Dir.exist?(local_build_dir)
+    build_task = platform == 'aarch64-linux-musl' ? 'llama:build_arm_musl' : 'llama:build_arm'
     raise "Local build directory not found: #{local_build_dir}\n" \
-          "Please run 'rake llama:build_arm' first to build the ARM64 binaries."
+          "Please run 'rake #{build_task}' first to build the ARM64 binaries."
   end
 
   puts "Using local build from #{local_build_dir} for #{platform}..."
