@@ -12,12 +12,21 @@ module Rllama
 
       @ctx_params = Cpp.llama_context_default_params
 
-      @ctx_params[:n_ctx] = @n_ctx
-      @ctx_params[:n_batch] = @n_batch
+      @ctx_params[:n_ctx] = @n_ctx if @n_ctx
+      @ctx_params[:n_batch] = @n_batch if @n_batch
 
       if @embeddings
-        @ctx_params[:n_seq_max] = [@n_batch, @model.n_seq_max].min
+        seq_cap = @model.n_seq_max
+
+        if @n_batch&.positive? && seq_cap&.positive?
+          @ctx_params[:n_seq_max] = [@n_batch, seq_cap].min
+        elsif seq_cap&.positive?
+          @ctx_params[:n_seq_max] = seq_cap
+        end
+
         @ctx_params[:embeddings] = true
+        @ctx_params[:kv_unified] = true
+        @ctx_params[:n_ubatch] = @n_batch if @n_batch&.positive?
       end
 
       @pointer = Cpp.llama_init_from_model(model.pointer, @ctx_params)
@@ -141,19 +150,31 @@ module Rllama
     end
     alias message generate
 
-    def embed(strings, normalize: true, batch_size: 512)
-      is_array = strings.is_a?(Array)
+    def embed(strings_or_tokens, normalize: true, batch_size: 512)
+      is_tokens = strings_or_tokens.is_a?(Array) &&
+                  (strings_or_tokens[0].is_a?(Integer) ||
+                   (strings_or_tokens[0].is_a?(Array) && strings_or_tokens[0][0].is_a?(Integer)))
 
-      strings = Array(strings) unless is_array
+      input_is_array = is_tokens ? strings_or_tokens[0].is_a?(Array) : strings_or_tokens.is_a?(Array)
 
-      tokenized_strings = strings.map do |text|
-        max_tokens = text.bytesize + 2
-        tokens_ptr = FFI::MemoryPointer.new(:int32, max_tokens)
-        count = Cpp.llama_tokenize(@model.vocab, text, text.bytesize, tokens_ptr, max_tokens, true, false)
+      normalized_inputs = input_is_array ? strings_or_tokens : [strings_or_tokens]
 
-        raise Error, "Failed to tokenize text: '#{text}'" if count.negative?
+      tokenized_strings =
+        if is_tokens
+          input_is_array ? strings_or_tokens : [strings_or_tokens]
+        else
+          normalized_inputs.map { |text| @model.tokenize(text) }
+        end
 
-        tokens_ptr.read_array_of_int32(count)
+      max_tokens_in_prompt = tokenized_strings.map(&:length).max || 0
+
+      if max_tokens_in_prompt > batch_size
+        raise Error, "batch_size (#{batch_size}) is smaller than the longest prompt (#{max_tokens_in_prompt} tokens)."
+      end
+
+      if max_tokens_in_prompt > @n_batch
+        raise Error, "Context n_batch (#{@n_batch}) is smaller than the longest " \
+                     "prompt (#{max_tokens_in_prompt} tokens). Increase batch_size when calling embed."
       end
 
       all_embeddings = []
@@ -165,6 +186,9 @@ module Rllama
         next if prompts_in_batch.empty?
 
         batch[:n_tokens] = current_batch_token_count
+
+        memory_ptr = Cpp.llama_get_memory(@pointer)
+        Cpp.llama_memory_clear(memory_ptr, true) unless memory_ptr.null?
 
         raise Error, 'llama_decode failed' unless Cpp.llama_decode(@pointer, batch).zero?
 
@@ -179,7 +203,8 @@ module Rllama
         end
 
         current_batch_token_count = 0
-        prompts_in_batch = []
+
+        prompts_in_batch.clear
       end
 
       tokenized_strings.each do |tokens|
@@ -207,7 +232,7 @@ module Rllama
 
       Cpp.llama_batch_free(batch)
 
-      is_array ? all_embeddings : all_embeddings[0]
+      input_is_array ? all_embeddings : all_embeddings[0]
     end
 
     def embeddings?

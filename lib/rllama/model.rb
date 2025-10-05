@@ -47,9 +47,30 @@ module Rllama
     alias message generate
 
     def embed(prompt, normalize: true, batch_size: 512, &block)
-      init_embedding_context do |ctx|
-        ctx.embed(prompt, normalize:, batch_size:, &block)
+      inputs = prompt.is_a?(Array) ? prompt : [prompt]
+
+      tokenized_inputs = inputs.map { |text| tokenize(text, max_tokens: n_ctx_train) }
+      max_token_length = tokenized_inputs.map(&:length).max || 0
+
+      effective_batch_size = [batch_size, max_token_length].max
+      effective_ctx = [n_ctx_train, max_token_length].min
+
+      init_embedding_context(n_ctx: effective_ctx, n_batch: effective_batch_size) do |ctx|
+        inputs = prompt.is_a?(Array) ? tokenized_inputs : tokenized_inputs[0]
+
+        ctx.embed(inputs, normalize:, batch_size: effective_batch_size, &block)
       end
+    end
+
+    def tokenize(text, max_tokens: nil)
+      size = text.bytesize + 2
+
+      tokens_ptr = FFI::MemoryPointer.new(:int32, size)
+      count = Cpp.llama_tokenize(vocab, text, text.bytesize, tokens_ptr, size, true, false)
+
+      raise Error, "Failed to tokenize text: '#{text}'" if count.negative?
+
+      tokens_ptr.read_array_of_int32([count, max_tokens].compact.min)
     end
 
     def close
@@ -70,7 +91,7 @@ module Rllama
       context
     end
 
-    def init_embedding_context(n_ctx: 2048, n_batch: 512, &)
+    def init_embedding_context(n_ctx: n_ctx_train, n_batch: 512, &)
       init_context(embeddings: true, n_ctx:, n_batch:, &)
     end
 

@@ -62,6 +62,8 @@ module Rllama
 
       local_path = File.join(dir, org, repo, file_path)
 
+      return local_path if File.exist?(local_path)
+
       puts "Destination: #{local_path}"
 
       download_file(url, local_path, "HuggingFace model: #{hf_path}")
@@ -74,6 +76,8 @@ module Rllama
 
       local_path = File.join(dir, filename)
 
+      return local_path if File.exist?(local_path)
+
       puts "Destination: #{local_path}"
 
       download_file(url, local_path, "URL: #{url}")
@@ -81,8 +85,6 @@ module Rllama
 
     def download_file(url, local_path, description)
       FileUtils.mkdir_p(File.dirname(local_path))
-
-      return local_path if File.exist?(local_path)
 
       temp_path = File.join(File.dirname(local_path), "~#{File.basename(local_path)}")
 
