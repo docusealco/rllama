@@ -1,3 +1,12 @@
 *.gem
 .bundle
 Gemfile.lock
+tmp/
+pkg/
+build/
+lib/rllama/aarch64-linux/
+lib/rllama/arm64-darwin/
+lib/rllama/x64-mingw-ucrt/
+lib/rllama/x64-mingw32/
+lib/rllama/x86_64-darwin/
+lib/rllama/x86_64-linux/

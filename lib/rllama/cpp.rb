@@ -8,22 +8,54 @@ module Rllama
 
     LIB_NAME = 'llama'
 
-    ffi_lib case FFI::Platform::OS
-            when 'darwin'
-              [
-                "lib#{LIB_NAME}.dylib",
-                "/opt/homebrew/lib#{LIB_NAME}.dylib"
-              ]
-            when 'windows'
-              [
-                "#{LIB_NAME}.dll",
-                "lib#{LIB_NAME}.dll"
-              ]
-            else
-              [
-                "lib#{LIB_NAME}.so"
-              ]
-            end
+    platform =
+      case FFI::Platform::OS
+      when 'darwin'
+        FFI::Platform::ARCH == 'aarch64' ? 'arm64-darwin' : 'x86_64-darwin'
+      when 'windows', 'mingw32'
+        'x64-mingw32'
+      else
+        FFI::Platform::ARCH == 'aarch64' ? 'aarch64-linux' : 'x86_64-linux'
+      end
+
+    lib_file =
+      case FFI::Platform::OS
+      when 'darwin'
+        "lib#{LIB_NAME}.dylib"
+      when 'windows', 'mingw32'
+        "#{LIB_NAME}.dll"
+      else
+        "lib#{LIB_NAME}.so"
+      end
+
+    platform_dir = File.join(__dir__, platform)
+    platform_path = File.join(platform_dir, lib_file)
+
+    lib_paths = []
+    lib_paths << platform_path if File.exist?(platform_path)
+
+    lib_paths +=
+      case FFI::Platform::OS
+      when 'darwin'
+        [
+          "lib#{LIB_NAME}.dylib",
+          "/opt/homebrew/lib/lib#{LIB_NAME}.dylib",
+          "/usr/local/lib/lib#{LIB_NAME}.dylib"
+        ]
+      when 'windows', 'mingw32'
+        [
+          "#{LIB_NAME}.dll",
+          "lib#{LIB_NAME}.dll"
+        ]
+      else
+        [
+          "lib#{LIB_NAME}.so",
+          "/usr/lib/lib#{LIB_NAME}.so",
+          "/usr/local/lib/lib#{LIB_NAME}.so"
+        ]
+      end
+
+    ffi_lib lib_paths
 
     # --- Typedefs and Opaque Pointers ---
     typedef :pointer, :llama_vocab_p

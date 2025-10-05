@@ -92,7 +92,8 @@ module Rllama
 
         available_popular.each do |model|
           display_name = File.basename(model[:path], '.gguf')
-          puts "  #{colorize(current_index.to_s, :green)}. #{display_name} #{colorize("(#{format_file_size(model[:size])})", :yellow)}"
+          puts "  #{colorize(current_index.to_s, :green)}. " \
+               "#{display_name} #{colorize("(#{format_file_size(model[:size])})", :yellow)}"
           all_choices << model[:path]
           current_index += 1
         end

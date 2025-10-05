@@ -19,13 +19,43 @@ Gem::Specification.new do |spec|
     'rubygems_mfa_required' => 'true'
   }
 
-  spec.files = Dir[
-    'lib/**/*',
+  # Base files included in all gems
+  base_files = Dir[
+    'lib/**/*.rb',
     'LICENSE',
     'README.md'
   ]
 
+  # If building for a specific platform, include the binary
+  spec.files =
+    if spec.platform.to_s == 'ruby'
+      base_files
+    else
+      platform_dir = case spec.platform.to_s
+                     when /x86_64-linux/
+                       'x86_64-linux'
+                     when /aarch64-linux/
+                       'aarch64-linux'
+                     when /x86_64-darwin/
+                       'x86_64-darwin'
+                     when /arm64-darwin/
+                       'arm64-darwin'
+                     when /x64-mingw32/
+                       'x64-mingw32'
+                     when /x64-mingw-ucrt/
+                       'x64-mingw-ucrt'
+                     end
+
+      if platform_dir
+        base_files + Dir["lib/rllama/#{platform_dir}/*"]
+      else
+        base_files
+      end
+    end
+
   spec.require_paths = ['lib']
+  spec.bindir = 'bin'
+  spec.executables = ['rllama']
 
   spec.add_dependency 'ffi', '>= 1.0'
 end
