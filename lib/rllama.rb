@@ -5,6 +5,7 @@ module Rllama
   autoload :Loader, 'rllama/loader'
   autoload :Context, 'rllama/context'
   autoload :Cpp, 'rllama/cpp'
+  autoload :Cli, 'rllama/cli'
   autoload :VERSION, 'rllama/version'
 
   Result = Struct.new(:text, :stats, keyword_init: true)
