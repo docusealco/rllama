@@ -1,3 +1,5 @@
+<img width="336" height="212.0" alt="Logo" src="https://github.com/user-attachments/assets/e27442fb-22d1-44cf-ba3d-f10b24c13652" />
+
 # Rllama
 
 Ruby bindings for [llama.cpp](https://github.com/ggerganov/llama.cpp) to run open-source language models locally. Run models like GPT-OSS, Qwen 3, Gemma 3, Llama 3, and many others directly in your Ruby application code.
@@ -21,6 +23,38 @@ Or install it yourself as:
 ```bash
 gem install rllama
 ```
+
+## CLI Chat
+
+The `rllama` command-line utility provides an interactive chat interface for conversing with language models. After installing the gem, you can start chatting immediately:
+
+```bash
+rllama
+```
+
+When you run `rllama` without arguments, it will display:
+
+- **Downloaded models**: Any models you've already downloaded to `~/.rllama/models/`
+- **Popular models**: A curated list of popular models available for download, including:
+  - Gemma 3 1B
+  - Llama 3.2 3B
+  - Phi-4
+  - Qwen3 30B
+  - GPT-OSS
+
+Simply enter the number of the model you want to use. If you select a model that hasn't been downloaded yet, it will be automatically downloaded from Hugging Face.
+
+You can also specify a model path or URL directly:
+
+```bash
+rllama path/to/your/model.gguf
+```
+
+```bash
+rllama https://huggingface.co/microsoft/phi-4-gguf/resolve/main/phi-4-Q3_K_S.gguf
+```
+
+Once the model has loaded, you can start chatting.
 
 ## Usage
 
@@ -162,42 +196,7 @@ By default, embedding vectors are normalized. You can disable normalization with
 ```ruby
 # Generate unnormalized embeddings
 embedding = model.embed('Sample text', normalize: false)
-
-# Use custom batch size for processing multiple texts
-embeddings = model.embed(
-  ['roses are red', 'violets are blue', 'sugar is sweet'],
-  normalize: true
-)
 ```
-
-## CLI Chat Utility
-
-The `rllama` command-line utility provides an interactive chat interface for conversing with language models. After installing the gem, you can start chatting immediately:
-
-```bash
-rllama
-```
-
-When you run `rllama` without arguments, it will display:
-
-- **Downloaded models**: Any models you've already downloaded to `~/.rllama/models/`
-- **Popular models**: A curated list of popular models available for download, including:
-  - Gemma 3 1B
-  - Llama 3.2 3B
-  - Phi-4
-  - Qwen3 30B
-  - GPT-OSS
-  - And more...
-
-Simply enter the number of the model you want to use. If you select a model that hasn't been downloaded yet, it will be automatically downloaded from Hugging Face.
-
-You can also specify a model path directly:
-
-```bash
-rllama path/to/your/model.gguf
-```
-
-Once the model loads, you can start chatting.
 
 ## Finding Models
 
