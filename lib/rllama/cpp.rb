@@ -8,7 +8,7 @@ module Rllama
 
     LIB_NAME = 'llama'
 
-    platform =
+    PLATFORM =
       case FFI::Platform::OS
       when 'darwin'
         FFI::Platform::ARCH == 'aarch64' ? 'arm64-darwin' : 'x86_64-darwin'
@@ -28,11 +28,26 @@ module Rllama
         "lib#{LIB_NAME}.so"
       end
 
-    platform_dir = File.join(__dir__, platform)
-    platform_path = File.join(platform_dir, lib_file)
+    PLATFORM_DIR = File.join(__dir__, PLATFORM)
+
+    platform_path = File.join(PLATFORM_DIR, lib_file)
 
     lib_paths = []
+
     lib_paths << platform_path if File.exist?(platform_path)
+
+    ggml_lib_file =
+      case FFI::Platform::OS
+      when 'darwin'
+        'libggml.dylib'
+      when 'windows', 'mingw32'
+        'ggml.dll'
+      else
+        'libggml.so'
+      end
+
+    ggml_platform_path = File.join(PLATFORM_DIR, ggml_lib_file)
+    lib_paths << ggml_platform_path if File.exist?(ggml_platform_path)
 
     lib_paths +=
       case FFI::Platform::OS
@@ -436,6 +451,8 @@ module Rllama
     attach_function :llama_backend_init, [], :void
     attach_function :llama_backend_free, [], :void
     attach_function :llama_numa_init, [:int], :void # ggml_numa_strategy
+    attach_function :ggml_backend_load_all, [], :void
+    attach_function :ggml_backend_load_all_from_path, [:string], :void
 
     # Threadpool
     attach_function :llama_attach_threadpool, %i[llama_context_p ggml_threadpool_t ggml_threadpool_t], :void
@@ -681,9 +698,13 @@ module Rllama
       llama_log_set(@log_callback, nil)
     end
 
-    llama_backend_init
-
     silence_log!
+
+    if File.directory?(PLATFORM_DIR)
+      ggml_backend_load_all_from_path(PLATFORM_DIR)
+    else
+      ggml_backend_load_all
+    end
 
     freeze
   end
