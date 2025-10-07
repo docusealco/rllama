@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
+require 'etc'
+
 module Rllama
   class Context
     attr_reader :messages, :n_ctx, :n_batch, :n_past
 
-    def initialize(model, embeddings: false, n_ctx: nil, n_batch: nil)
+    def initialize(model, embeddings: false, n_ctx: nil, n_batch: nil, n_threads: Etc.nprocessors)
       @model = model
       @n_ctx = n_ctx
       @n_batch = n_batch
@@ -14,6 +16,9 @@ module Rllama
 
       @ctx_params[:n_ctx] = @n_ctx if @n_ctx
       @ctx_params[:n_batch] = @n_batch if @n_batch
+
+      @ctx_params[:n_threads] = n_threads
+      @ctx_params[:n_threads_batch] = n_threads
 
       if @embeddings
         seq_cap = @model.n_seq_max
