@@ -7,7 +7,7 @@ Gem::Specification.new do |spec|
   spec.version = Rllama::VERSION
   spec.authors = ['Pete Matsyburka']
   spec.email = ['pete@docuseal.com']
-  spec.summary = 'Ruby bindings for Llama API'
+  spec.summary = 'Ruby bindings for llama.cpp to run local LLMs with Ruby.'
   spec.description = 'Ruby bindings for Llama.cpp to run local LLMs in Ruby applications.'
   spec.license = 'MIT'
   spec.required_ruby_version = '>= 3.1.0'
