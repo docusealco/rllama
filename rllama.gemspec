@@ -32,8 +32,12 @@ Gem::Specification.new do |spec|
       base_files
     else
       platform_dir = case spec.platform.to_s
+                     when /x86_64-linux-musl/
+                       'x86_64-linux-musl'
                      when /x86_64-linux/
                        'x86_64-linux'
+                     when /aarch64-linux-musl/
+                       'aarch64-linux-musl'
                      when /aarch64-linux/
                        'aarch64-linux'
                      when /x86_64-darwin/

@@ -5,13 +5,19 @@ require 'readline'
 module Rllama
   class Cli
     POPULAR_MODELS = [
-      { path: 'lmstudio-community/gemma-3-1B-it-QAT-GGUF/gemma-3-1B-it-QAT-Q4_0.gguf', size: 720_425_472 },
-      { path: 'lmstudio-community/gpt-oss-20b-GGUF/gpt-oss-20b-MXFP4.gguf', size: 12_109_565_632 },
-      { path: 'bartowski/Llama-3.2-3B-Instruct-GGUF/Llama-3.2-3B-Instruct-Q4_K_M.gguf', size: 2_019_377_696 },
-      { path: 'unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q3_K_S.gguf', size: 13_292_468_800 },
+      { path: 'lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf', size: 5_335_285_280 },
+      { path: 'lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf', size: 16_796_010_624 },
+      { path: 'unsloth/NVIDIA-Nemotron-3-Nano-4B-GGUF/NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf', size: 2_900_295_712 },
+      { path: 'unsloth/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-Q4_K_M.gguf', size: 22_016_023_168 },
+      { path: 'lmstudio-community/LFM2-24B-A2B-GGUF/LFM2-24B-A2B-Q4_K_M.gguf', size: 14_415_473_952 },
+      { path: 'unsloth/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q4_K_M.gguf', size: 18_312_339_808 },
       { path: 'inclusionAI/Ling-mini-2.0-GGUF/Ling-mini-2.0-Q4_K_M.gguf', size: 9_911_575_072 },
+      { path: 'lmstudio-community/gpt-oss-20b-GGUF/gpt-oss-20b-MXFP4.gguf', size: 12_109_565_632 },
       { path: 'unsloth/gemma-3n-E4B-it-GGUF/gemma-3n-E4B-it-Q4_K_S.gguf', size: 4_404_697_216 },
-      { path: 'microsoft/phi-4-gguf/phi-4-Q4_K_S.gguf', size: 8_440_762_560 }
+      { path: 'unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q3_K_S.gguf', size: 13_292_468_800 },
+      { path: 'lmstudio-community/gemma-3-1B-it-QAT-GGUF/gemma-3-1B-it-QAT-Q4_0.gguf', size: 720_425_472 },
+      { path: 'microsoft/phi-4-gguf/phi-4-Q4_K_S.gguf', size: 8_440_762_560 },
+      { path: 'bartowski/Llama-3.2-3B-Instruct-GGUF/Llama-3.2-3B-Instruct-Q4_K_M.gguf', size: 2_019_377_696 }
     ].freeze
 
     COLOR_CODES = {

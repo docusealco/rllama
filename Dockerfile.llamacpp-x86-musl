@@ -1,17 +1,14 @@
-# Dockerfile for building llama.cpp on Ubuntu ARM64
-# Using Ubuntu 22.04 for better compatibility (glibc 2.35)
-FROM ubuntu:22.04
-
-ENV DEBIAN_FRONTEND=noninteractive
+# Dockerfile for building llama.cpp on Alpine Linux x86_64 (musl-based)
+# Using Alpine for musl libc compatibility
+FROM alpine:latest
 
 # Install required dependencies
-RUN apt update && \
-    apt install -y \
-    build-essential \
+RUN apk add --no-cache \
+    build-base \
     git \
     cmake \
-    patchelf && \
-    rm -rf /var/lib/apt/lists/*
+    patchelf \
+    linux-headers
 
 # Set working directory
 WORKDIR /workspace

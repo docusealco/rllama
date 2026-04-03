@@ -4,6 +4,16 @@ module Rllama
   class Model
     DEFAULT_CONTEXT_LENGTH = 2**13
 
+    FALLBACK_TEMPLATES = {
+      'gemma4' => {
+        bos: '<bos>',
+        role_map: { 'assistant' => 'model' },
+        turn_start: ->(role) { "<|turn>#{role}\n" },
+        turn_end: "<turn|>\n",
+        generation_prompt: "<|turn>model\n"
+      }
+    }.freeze
+
     attr_reader :pointer
 
     def initialize(path_or_name, dir: nil)
@@ -34,6 +44,16 @@ module Rllama
 
     def n_ctx_train
       @n_ctx_train ||= Cpp.llama_model_n_ctx_train(@pointer)
+    end
+
+    def architecture
+      @architecture ||= begin
+        buf = FFI::MemoryPointer.new(:char, 256)
+
+        n = Cpp.llama_model_meta_val_str(@pointer, 'general.architecture', buf, 256)
+
+        n.positive? ? buf.read_string(n) : nil
+      end
     end
 
     def generate(prompt, max_tokens: DEFAULT_CONTEXT_LENGTH, temperature: 0.8, top_k: 40, top_p: 0.95, min_p: 0.05,
@@ -98,6 +118,14 @@ module Rllama
     def build_chat_template(messages)
       raise Error, 'Model does not provide a chat template' if chat_template.nil? || chat_template.empty?
 
+      result = apply_chat_template(messages)
+
+      return result if result
+
+      apply_chat_template_fallback(messages)
+    end
+
+    def apply_chat_template(messages)
       count = messages.length
       struct_size = Cpp::LlamaChatMessage.size
       array_ptr = FFI::MemoryPointer.new(struct_size * count)
@@ -111,14 +139,34 @@ module Rllama
 
       needed = Cpp.llama_chat_apply_template(chat_template, array_ptr, count, true, nil, 0)
 
-      raise Error, 'Failed to apply chat template' if needed.negative?
+      return nil if needed.negative?
 
       buf = FFI::MemoryPointer.new(:char, needed)
       written = Cpp.llama_chat_apply_template(chat_template, array_ptr, count, true, buf, needed)
 
-      raise Error, 'Failed to apply chat template' if written.negative?
+      return nil if written.negative?
 
       buf.read_string(written)
+    end
+
+    def apply_chat_template_fallback(messages)
+      tmpl = FALLBACK_TEMPLATES[architecture]
+
+      raise Error, "Unsupported chat template for architecture: #{architecture || 'unknown'}" unless tmpl
+
+      result = String.new(tmpl[:bos] || '')
+      role_map = tmpl[:role_map] || {}
+
+      messages.each do |m|
+        role = role_map[m[:role].to_s] || m[:role].to_s
+        result << tmpl[:turn_start].call(role)
+        result << m[:content].to_s
+        result << tmpl[:turn_end]
+      end
+
+      result << tmpl[:generation_prompt]
+
+      result
     end
   end
 end

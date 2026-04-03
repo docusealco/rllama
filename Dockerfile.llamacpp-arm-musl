@@ -14,7 +14,7 @@ RUN apk add --no-cache \
 WORKDIR /workspace
 
 # Clone llama.cpp repository (shallow clone for faster build)
-RUN git clone --depth=1 https://github.com/ggml-org/llama.cpp
+RUN git clone --depth=1 --branch b8642 https://github.com/ggml-org/llama.cpp
 
 # Build llama.cpp with BUILD_SHARED_LIBS=ON and set RPATH for library discovery
 WORKDIR /workspace/llama.cpp

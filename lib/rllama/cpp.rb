@@ -15,7 +15,11 @@ module Rllama
       when 'windows', 'mingw32'
         'x64-mingw32'
       else
-        FFI::Platform::ARCH == 'aarch64' ? 'aarch64-linux' : 'x86_64-linux'
+        arch = FFI::Platform::ARCH == 'aarch64' ? 'aarch64' : 'x86_64'
+
+        is_musl = defined?(FFI::Platform::IS_GNU) ? !FFI::Platform::IS_GNU : RbConfig::CONFIG['host_os'].include?('musl')
+
+        is_musl ? "#{arch}-linux-musl" : "#{arch}-linux"
       end
 
     lib_file =
@@ -359,7 +363,9 @@ module Rllama
              :no_perf, :bool,
              :op_offload, :bool,
              :swa_full, :bool,
-             :kv_unified, :bool
+             :kv_unified, :bool,
+             :samplers, :pointer,
+             :n_samplers, :size_t
     end
 
     class LlamaModelQuantizeParams < FFI::Struct
@@ -533,10 +539,8 @@ module Rllama
     attach_function :llama_adapter_lora_free, [:llama_adapter_lora_p], :void
     attach_function :llama_adapter_get_alora_n_invocation_tokens, [:llama_adapter_lora_p], :uint64
     attach_function :llama_adapter_get_alora_invocation_tokens, [:llama_adapter_lora_p], :pointer # const llama_token*
-    attach_function :llama_set_adapter_lora, %i[llama_context_p llama_adapter_lora_p float], :int32
-    attach_function :llama_rm_adapter_lora, %i[llama_context_p llama_adapter_lora_p], :int32
-    attach_function :llama_clear_adapter_lora, [:llama_context_p], :void
-    attach_function :llama_apply_adapter_cvec, %i[llama_context_p pointer size_t int32 int32 int32], :int32
+    attach_function :llama_set_adapters_lora, %i[llama_context_p pointer size_t pointer], :int32
+    attach_function :llama_set_adapter_cvec, %i[llama_context_p pointer size_t int32 int32 int32], :int32
 
     # Memory management
     attach_function :llama_memory_clear, %i[llama_memory_t bool], :void

@@ -6,30 +6,35 @@ require 'net/http'
 require 'uri'
 require 'zip'
 
-LLAMA_CPP_VERSION = ENV.fetch('LLAMA_CPP_VERSION', 'b6691')
+LLAMA_CPP_VERSION = ENV.fetch('LLAMA_CPP_VERSION', 'b8642')
 
 PLATFORMS = {
   'x86_64-linux' => {
     gem_platform: 'x86_64-linux-gnu',
-    asset_name: 'llama-%<version>s-bin-ubuntu-x64.zip',
+    asset_name: 'llama-%<version>s-bin-ubuntu-x64.tar.gz',
     lib_extension: '.so'
   },
   'aarch64-linux' => {
     gem_platform: 'aarch64-linux-gnu',
+    asset_name: 'llama-%<version>s-bin-ubuntu-arm64.tar.gz',
     lib_extension: '.so'
   },
   'aarch64-linux-musl' => {
     gem_platform: 'aarch64-linux-musl',
     lib_extension: '.so'
   },
+  'x86_64-linux-musl' => {
+    gem_platform: 'x86_64-linux-musl',
+    lib_extension: '.so'
+  },
   'x86_64-darwin' => {
     gem_platform: 'x86_64-darwin',
-    asset_name: 'llama-%<version>s-bin-macos-x64.zip',
+    asset_name: 'llama-%<version>s-bin-macos-x64.tar.gz',
     lib_extension: '.dylib'
   },
   'arm64-darwin' => {
     gem_platform: 'arm64-darwin',
-    asset_name: 'llama-%<version>s-bin-macos-arm64.zip',
+    asset_name: 'llama-%<version>s-bin-macos-arm64.tar.gz',
     lib_extension: '.dylib'
   },
   'x64-mingw32' => {
@@ -114,6 +119,30 @@ namespace :llama do
     end
   end
 
+  desc 'Build x86_64 Linux musl binaries using Docker'
+  task :build_x86_musl do
+    puts 'Building llama.cpp Docker image for x86_64 musl...'
+    sh 'docker build --platform linux/amd64 -t llamacpp-builder-x86-musl -f Dockerfile.llamacpp-x86-musl .'
+
+    puts 'Creating container from image...'
+    container_id = `docker create --platform linux/amd64 llamacpp-builder-x86-musl`.strip
+    puts "Container ID: #{container_id}"
+
+    begin
+      puts 'Creating output directory...'
+      FileUtils.mkdir_p('build/linux-x86_64-musl')
+
+      puts 'Copying built files from container to build/linux-x86_64-musl...'
+      sh "docker cp #{container_id}:/workspace/llama.cpp/build/. build/linux-x86_64-musl/"
+
+      puts 'Build complete! Files are available in build/linux-x86_64-musl/'
+      sh 'ls -lh build/linux-x86_64-musl/'
+    ensure
+      puts 'Cleaning up container...'
+      sh "docker rm #{container_id}"
+    end
+  end
+
   desc 'Build ARM64 Linux and copy to lib directory'
   task build_and_install_arm: ['llama:build_arm'] do
     puts "\nCopying ARM64 binaries to lib directory..."
@@ -126,6 +155,13 @@ namespace :llama do
     puts "\nCopying ARM64 musl binaries to lib directory..."
     download_llama_binary('aarch64-linux-musl')
     puts 'ARM64 Linux musl binaries ready!'
+  end
+
+  desc 'Build x86_64 Linux musl and copy to lib directory'
+  task build_and_install_x86_musl: ['llama:build_x86_musl'] do
+    puts "\nCopying x86_64 musl binaries to lib directory..."
+    download_llama_binary('x86_64-linux-musl')
+    puts 'x86_64 Linux musl binaries ready!'
   end
 end
 
@@ -258,8 +294,8 @@ def download_llama_binary(platform)
   config = PLATFORMS[platform]
   raise ArgumentError, "Unknown platform: #{platform}" unless config
 
-  # Special case: use local build for aarch64-linux and aarch64-linux-musl
-  if platform == 'aarch64-linux' || platform == 'aarch64-linux-musl'
+  # Special case: use local build for musl platforms (no pre-built binary available)
+  if platform == 'aarch64-linux-musl' || platform == 'x86_64-linux-musl'
     copy_local_build(platform, config)
     return
   end
@@ -270,15 +306,15 @@ def download_llama_binary(platform)
   tmp_dir = 'tmp/llama'
   FileUtils.mkdir_p(tmp_dir)
 
-  zip_path = File.join(tmp_dir, asset_name)
+  archive_path = File.join(tmp_dir, asset_name)
 
   puts "Downloading #{asset_name} for #{platform}..."
-  download_file(download_url, zip_path)
+  download_file(download_url, archive_path)
 
   puts "Extracting #{asset_name}..."
   extract_dir = File.join(tmp_dir, platform)
   FileUtils.mkdir_p(extract_dir)
-  extract_zip(zip_path, extract_dir)
+  extract_archive(archive_path, extract_dir)
 
   # Find all shared libraries with the correct extension
   lib_extension = config[:lib_extension]
@@ -306,7 +342,7 @@ def download_llama_binary(platform)
   puts "Successfully installed #{lib_files.length} libraries to #{lib_dest_dir}"
 
   # Clean up
-  FileUtils.rm_f(zip_path)
+  FileUtils.rm_f(archive_path)
   FileUtils.rm_rf(extract_dir)
 end
 
@@ -317,6 +353,8 @@ def copy_local_build(platform, config)
                       'build/linux-aarch64'
                     when 'aarch64-linux-musl'
                       'build/linux-aarch64-musl'
+                    when 'x86_64-linux-musl'
+                      'build/linux-x86_64-musl'
                     else
                       raise "Unsupported platform for local build: #{platform}"
                     end
@@ -377,6 +415,16 @@ def download_file(url, destination)
         raise "Failed to download #{url}: #{response.code} #{response.message}"
       end
     end
+  end
+end
+
+def extract_archive(archive_path, destination)
+  if archive_path.end_with?('.tar.gz', '.tgz')
+    system('tar', 'xzf', archive_path, '-C', destination) || raise("Failed to extract #{archive_path}")
+  elsif archive_path.end_with?('.zip')
+    extract_zip(archive_path, destination)
+  else
+    raise "Unknown archive format: #{archive_path}"
   end
 end
 

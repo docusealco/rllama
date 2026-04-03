@@ -2,7 +2,7 @@
 
 # Rllama
 
-Ruby bindings for [llama.cpp](https://github.com/ggerganov/llama.cpp) to run open-source language models locally. Run models like GPT-OSS, Qwen 3, Gemma 3, Llama 3, and many others directly in your Ruby application code.
+Ruby bindings for [llama.cpp](https://github.com/ggml-org/llama.cpp) to run open-source language models locally. Run models like Gemma 4, Qwen 3.5, GLM 4.7, Nemotron, LFM2, Llama 3, and many others directly in your Ruby application code.
 
 ## Installation
 
@@ -36,11 +36,14 @@ When you run `rllama` without arguments, it will display:
 
 - **Downloaded models**: Any models you've already downloaded to `~/.rllama/models/`
 - **Popular models**: A curated list of popular models available for download, including:
-  - Gemma 3 1B
+  - Gemma 4 E4B / Gemma 4 26B-A4B
+  - Nemotron 3 Nano 4B
+  - Qwen 3.5 35B-A3B
+  - LFM2 24B-A2B
+  - GLM 4.7 Flash
+  - GPT-OSS 20B
   - Llama 3.2 3B
   - Phi-4
-  - Qwen3 30B
-  - GPT-OSS
 
 Simply enter the number of the model you want to use. If you select a model that hasn't been downloaded yet, it will be automatically downloaded from Hugging Face.
 
