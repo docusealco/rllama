@@ -23,6 +23,7 @@ Gem::Specification.new do |spec|
   base_files = Dir[
     'lib/**/*.rb',
     'LICENSE',
+    'licenses/*',
     'README.md'
   ]
 
@@ -44,10 +45,6 @@ Gem::Specification.new do |spec|
                        'x86_64-darwin'
                      when /arm64-darwin/
                        'arm64-darwin'
-                     when /x64-mingw32/
-                       'x64-mingw32'
-                     when /x64-mingw-ucrt/
-                       'x64-mingw-ucrt'
                      end
 
       if platform_dir

@@ -14,7 +14,7 @@ Lint/MissingSuper:
   Enabled: false
 
 Metrics/ParameterLists:
-  Max: 10
+  Max: 11
 
 Metrics/MethodLength:
   Max: 100

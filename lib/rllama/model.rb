@@ -4,15 +4,7 @@ module Rllama
   class Model
     DEFAULT_CONTEXT_LENGTH = 2**13
 
-    FALLBACK_TEMPLATES = {
-      'gemma4' => {
-        bos: '<bos>',
-        role_map: { 'assistant' => 'model' },
-        turn_start: ->(role) { "<|turn>#{role}\n" },
-        turn_end: "<turn|>\n",
-        generation_prompt: "<|turn>model\n"
-      }
-    }.freeze
+    DEFAULT_SAMPLING = { temperature: 0.8, top_k: 40, top_p: 0.95, min_p: 0.05 }.freeze
 
     attr_reader :pointer
 
@@ -46,21 +38,35 @@ module Rllama
       @n_ctx_train ||= Cpp.llama_model_n_ctx_train(@pointer)
     end
 
-    def architecture
-      @architecture ||= begin
-        buf = FFI::MemoryPointer.new(:char, 256)
+    def meta(key)
+      buffer = FFI::MemoryPointer.new(:char, 256)
+      length = Cpp.llama_model_meta_val_str(@pointer, key.to_s, buffer, buffer.size)
 
-        n = Cpp.llama_model_meta_val_str(@pointer, 'general.architecture', buf, 256)
-
-        n.positive? ? buf.read_string(n) : nil
-      end
+      length.negative? ? nil : buffer.read_string
     end
 
-    def generate(prompt, max_tokens: DEFAULT_CONTEXT_LENGTH, temperature: 0.8, top_k: 40, top_p: 0.95, min_p: 0.05,
-                 seed: nil, system: nil, &block)
+    def sampling_defaults
+      @sampling_defaults ||= {
+        temperature: fetch_meta_float('general.sampling.temp') || DEFAULT_SAMPLING[:temperature],
+        top_k: fetch_meta_int('general.sampling.top_k') || DEFAULT_SAMPLING[:top_k],
+        top_p: fetch_meta_float('general.sampling.top_p') || DEFAULT_SAMPLING[:top_p],
+        min_p: fetch_meta_float('general.sampling.min_p') || DEFAULT_SAMPLING[:min_p]
+      }
+    end
+
+    def bos_token
+      @bos_token ||= token_to_string(Cpp.llama_vocab_bos(vocab))
+    end
+
+    def eos_token
+      @eos_token ||= token_to_string(Cpp.llama_vocab_eos(vocab))
+    end
+
+    def generate(prompt, max_tokens: DEFAULT_CONTEXT_LENGTH, temperature: nil, top_k: nil, top_p: nil, min_p: nil,
+                 seed: nil, system: nil, tools: nil, reasoning: nil, &block)
       init_context(n_ctx: max_tokens) do |ctx|
         ctx.generate(prompt, max_tokens: ctx.n_ctx,
-                             temperature:, top_k:, top_p:, seed:, system:, min_p:,
+                             temperature:, top_k:, top_p:, seed:, system:, min_p:, tools:, reasoning:,
                      &block)
       end
     end
@@ -94,11 +100,18 @@ module Rllama
     end
 
     def close
+      if @chat_templates
+        Common.chat_templates_free(@chat_templates)
+
+        @chat_templates = nil
+      end
+
       Cpp.llama_model_free(@pointer)
     end
 
-    def init_context(embeddings: false, n_ctx: DEFAULT_CONTEXT_LENGTH, n_batch: 512)
-      context = Context.new(self, embeddings:, n_ctx:, n_batch:)
+    def init_context(embeddings: false, n_ctx: DEFAULT_CONTEXT_LENGTH, n_batch: 512, system: nil, tools: nil,
+                     reasoning: false)
+      context = Context.new(self, embeddings:, n_ctx:, n_batch:, system:, tools:, reasoning:)
 
       if block_given?
         result = yield context
@@ -115,58 +128,43 @@ module Rllama
       init_context(embeddings: true, n_ctx:, n_batch:, &)
     end
 
-    def build_chat_template(messages)
+    def apply_chat_template(messages, tools: nil, add_generation_prompt: true, enable_thinking: false)
       raise Error, 'Model does not provide a chat template' if chat_template.nil? || chat_template.empty?
 
-      result = apply_chat_template(messages)
-
-      return result if result
-
-      apply_chat_template_fallback(messages)
+      Common.chat_apply(chat_templates, messages:, tools:, add_generation_prompt:, enable_thinking:,
+                                        add_bos: Cpp.llama_vocab_get_add_bos(vocab),
+                                        add_eos: Cpp.llama_vocab_get_add_eos(vocab))
     end
 
-    def apply_chat_template(messages)
-      count = messages.length
-      struct_size = Cpp::LlamaChatMessage.size
-      array_ptr = FFI::MemoryPointer.new(struct_size * count)
-
-      messages.each_with_index do |m, i|
-        struct_ptr = array_ptr + (i * struct_size)
-        msg_struct = Cpp::LlamaChatMessage.new(struct_ptr)
-        msg_struct[:role] = FFI::MemoryPointer.from_string(m[:role].to_s)
-        msg_struct[:content] = FFI::MemoryPointer.from_string(m[:content].to_s)
-      end
-
-      needed = Cpp.llama_chat_apply_template(chat_template, array_ptr, count, true, nil, 0)
-
-      return nil if needed.negative?
-
-      buf = FFI::MemoryPointer.new(:char, needed)
-      written = Cpp.llama_chat_apply_template(chat_template, array_ptr, count, true, buf, needed)
-
-      return nil if written.negative?
-
-      buf.read_string(written)
+    def build_chat_template(messages, tools: nil, add_generation_prompt: true, enable_thinking: false)
+      apply_chat_template(messages, tools:, add_generation_prompt:, enable_thinking:)['prompt']
     end
 
-    def apply_chat_template_fallback(messages)
-      tmpl = FALLBACK_TEMPLATES[architecture]
+    private
 
-      raise Error, "Unsupported chat template for architecture: #{architecture || 'unknown'}" unless tmpl
+    def fetch_meta_float(key)
+      value = meta(key)
 
-      result = String.new(tmpl[:bos] || '')
-      role_map = tmpl[:role_map] || {}
+      value && Float(value, exception: false)
+    end
 
-      messages.each do |m|
-        role = role_map[m[:role].to_s] || m[:role].to_s
-        result << tmpl[:turn_start].call(role)
-        result << m[:content].to_s
-        result << tmpl[:turn_end]
-      end
+    def fetch_meta_int(key)
+      value = meta(key)
 
-      result << tmpl[:generation_prompt]
+      return nil unless value
 
-      result
+      Integer(value, exception: false) || Float(value, exception: false)&.to_i
+    end
+
+    def chat_templates
+      @chat_templates ||= Common.chat_templates_init(@pointer, chat_template, bos_token, eos_token)
+    end
+
+    def token_to_string(token_id)
+      buf = FFI::MemoryPointer.new(:char, 256)
+      n = Cpp.llama_token_to_piece(vocab, token_id, buf, buf.size, 0, true)
+
+      n.positive? ? buf.read_string(n) : ''
     end
   end
 end

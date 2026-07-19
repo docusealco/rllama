@@ -14,7 +14,7 @@ RUN apk add --no-cache \
 WORKDIR /workspace
 
 # Clone llama.cpp repository (shallow clone for faster build)
-RUN git clone --depth=1 --branch b8642 https://github.com/ggml-org/llama.cpp
+RUN git clone --depth=1 --branch b10067 https://github.com/ggml-org/llama.cpp
 
 # Build llama.cpp with BUILD_SHARED_LIBS=ON and set RPATH for library discovery
 WORKDIR /workspace/llama.cpp
@@ -26,6 +26,15 @@ RUN cmake -B build \
     -DCMAKE_INSTALL_RPATH='$ORIGIN' \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON && \
     cmake --build build --config Release -j$(nproc)
+
+# Build the rllama C shim over libllama-common
+COPY ext /workspace/ext
+RUN c++ -std=c++17 -O2 -shared -fPIC -fvisibility=hidden -DRLC_BUILD \
+    -Icommon -Iinclude -Iggml/include -Ivendor \
+    /workspace/ext/llama_common.cpp \
+    -Lbuild/bin -lllama-common -lggml-base \
+    -Wl,-rpath,'$ORIGIN' \
+    -o build/bin/libllama_common.so
 
 # Set RPATH on all shared libraries so they can find each other
 RUN find build -name "*.so*" -type f -exec patchelf --set-rpath '$ORIGIN' {} \; || true

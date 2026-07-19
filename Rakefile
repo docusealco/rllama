@@ -6,7 +6,7 @@ require 'net/http'
 require 'uri'
 require 'zip'
 
-LLAMA_CPP_VERSION = ENV.fetch('LLAMA_CPP_VERSION', 'b8642')
+LLAMA_CPP_VERSION = ENV.fetch('LLAMA_CPP_VERSION', 'b10067')
 
 PLATFORMS = {
   'x86_64-linux' => {
@@ -36,16 +36,6 @@ PLATFORMS = {
     gem_platform: 'arm64-darwin',
     asset_name: 'llama-%<version>s-bin-macos-arm64.tar.gz',
     lib_extension: '.dylib'
-  },
-  'x64-mingw32' => {
-    gem_platform: 'x64-mingw32',
-    asset_name: 'llama-%<version>s-bin-win-cpu-x64.zip',
-    lib_extension: '.dll'
-  },
-  'x64-mingw-ucrt' => {
-    gem_platform: 'x64-mingw-ucrt',
-    asset_name: 'llama-%<version>s-bin-win-cpu-x64.zip',
-    lib_extension: '.dll'
   }
 }.freeze
 
@@ -162,6 +152,41 @@ namespace :llama do
     puts "\nCopying x86_64 musl binaries to lib directory..."
     download_llama_binary('x86_64-linux-musl')
     puts 'x86_64 Linux musl binaries ready!'
+  end
+end
+
+namespace :ext do
+  desc 'Build the librllama_common shim against the pinned llama.cpp source'
+  task :build, [:platform] do |_t, args|
+    platform = args[:platform] || {
+      /arm64-darwin/ => 'arm64-darwin',
+      /x86_64-darwin/ => 'x86_64-darwin',
+      /aarch64-linux/ => 'aarch64-linux',
+      /x86_64-linux/ => 'x86_64-linux'
+    }.find { |pattern, _| RUBY_PLATFORM.match?(pattern) }&.last
+
+    raise "Unsupported platform: #{RUBY_PLATFORM}" unless platform
+
+    src = ENV.fetch('LLAMA_CPP_SRC') do
+      dir = File.expand_path("tmp/llama.cpp-#{LLAMA_CPP_VERSION}", __dir__)
+
+      unless File.directory?(dir)
+        sh 'git', 'clone', '--depth=1', '--branch', LLAMA_CPP_VERSION,
+           'https://github.com/ggml-org/llama.cpp', dir
+      end
+
+      dir
+    end
+
+    lib_dir = File.expand_path("lib/rllama/#{platform}", __dir__)
+    build_dir = "ext/build-#{platform}"
+
+    sh 'cmake', '-S', 'ext', '-B', build_dir,
+       '-DCMAKE_BUILD_TYPE=Release',
+       "-DLLAMA_CPP_DIR=#{src}",
+       "-DRLLAMA_LIB_DIR=#{lib_dir}"
+    sh 'cmake', '--build', build_dir, '-j'
+    sh 'cmake', '--install', build_dir
   end
 end
 
@@ -283,8 +308,6 @@ def detect_platform
     RbConfig::CONFIG['host_cpu'] == 'arm64' ? 'arm64-darwin' : 'x86_64-darwin'
   when /linux/
     RbConfig::CONFIG['host_cpu'] == 'aarch64' ? 'aarch64-linux' : 'x86_64-linux'
-  when /mingw|mswin/
-    'x64-mingw32'
   else
     raise "Unsupported platform: #{RbConfig::CONFIG['host_os']}"
   end
@@ -321,7 +344,7 @@ def download_llama_binary(platform)
   lib_files = Dir.glob(File.join(extract_dir, '**', "*#{lib_extension}"))
 
   # Filter out libraries we don't want to bundle
-  excluded_libs = %w[libmtmd mtmd]
+  excluded_libs = %w[libmtmd mtmd -impl]
   lib_files.reject! do |lib_file|
     basename = File.basename(lib_file, lib_extension)
     excluded_libs.any? { |excluded| basename.include?(excluded) }
@@ -372,7 +395,7 @@ def copy_local_build(platform, config)
   lib_files = Dir.glob(File.join(local_build_dir, '**', "*#{lib_extension}"))
 
   # Filter out libraries we don't want to bundle
-  excluded_libs = %w[libmtmd mtmd]
+  excluded_libs = %w[libmtmd mtmd -impl]
   lib_files.reject! do |lib_file|
     basename = File.basename(lib_file, lib_extension)
     excluded_libs.any? { |excluded| basename.include?(excluded) }

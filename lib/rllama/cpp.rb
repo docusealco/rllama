@@ -328,9 +328,12 @@ module Rllama
              :kv_overrides, :pointer, # const LlamaModelKvOverride*
              :vocab_only, :bool,
              :use_mmap, :bool,
+             :use_direct_io, :bool,
              :use_mlock, :bool,
              :check_tensors, :bool,
-             :use_extra_bufts, :bool
+             :use_extra_bufts, :bool,
+             :no_host, :bool,
+             :no_alloc, :bool
     end
 
     class LlamaContextParams < FFI::Struct
@@ -338,8 +341,11 @@ module Rllama
              :n_batch, :uint32,
              :n_ubatch, :uint32,
              :n_seq_max, :uint32,
+             :n_rs_seq, :uint32,
+             :n_outputs_max, :uint32,
              :n_threads, :int32,
              :n_threads_batch, :int32,
+             :ctx_type, :int, # enum llama_context_type
              :rope_scaling_type, :int, # enum llama_rope_scaling_type
              :pooling_type, :int,      # enum llama_pooling_type
              :attention_type, :int,    # enum llama_attention_type
@@ -378,6 +384,7 @@ module Rllama
              :only_copy, :bool,
              :pure, :bool,
              :keep_split, :bool,
+             :dry_run, :bool,
              :imatrix, :pointer,
              :kv_overrides, :pointer,
              :tensor_types, :pointer,
@@ -391,11 +398,6 @@ module Rllama
 
     class LlamaSamplerChainParams < FFI::Struct
       layout :no_perf, :bool
-    end
-
-    class LlamaChatMessage < FFI::Struct
-      layout :role, :pointer,
-             :content, :pointer
     end
 
     class LlamaSamplerI < FFI::Struct; end
@@ -622,10 +624,6 @@ module Rllama
     attach_function :llama_tokenize, %i[llama_vocab_p string int32 pointer int32 bool bool], :int32
     attach_function :llama_token_to_piece, %i[llama_vocab_p llama_token pointer int32 int32 bool], :int32
     attach_function :llama_detokenize, %i[llama_vocab_p pointer int32 pointer int32 bool bool], :int32
-
-    # Chat templates
-    attach_function :llama_chat_apply_template, %i[string pointer size_t bool pointer int32], :int32
-    attach_function :llama_chat_builtin_templates, %i[pointer size_t], :int32
 
     # Sampling API
     attach_function :llama_sampler_init, %i[pointer llama_sampler_context_t], :llama_sampler_p

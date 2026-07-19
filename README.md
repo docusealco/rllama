@@ -87,7 +87,14 @@ model.close
 
 #### Generation parameters
 
-Adjust the generation with parameters:
+By default the sampling parameters are taken from the model's own
+`general.sampling.*` GGUF metadata when present (falling back to llama.cpp's
+standard defaults: `temperature: 0.8`, `top_k: 40`, `top_p: 0.95`,
+`min_p: 0.05`). You can inspect the resolved values with
+`model.sampling_defaults`, or read any metadata key directly with
+`model.meta('general.sampling.temp')`.
+
+Pass any parameter explicitly to override the model default:
 
 ```ruby
 result = model.generate(
@@ -99,6 +106,9 @@ result = model.generate(
   min_p: 0.05
 )
 ```
+
+The parameters actually used are reported back in `result.stats`
+(`temperature`, `top_k`, `top_p`, `min_p`, `seed`).
 
 #### Streaming generation
 
@@ -134,6 +144,95 @@ result = model.generate([
 ])
 puts result.text
 ```
+
+#### Tool definitions
+
+Pass tool definitions to include them in the model's prompt for function calling:
+
+```ruby
+tools = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description: 'Get the current weather for a location',
+      parameters: {
+        type: 'object',
+        properties: {
+          location: { type: 'string', description: 'City name' }
+        },
+        required: ['location']
+      }
+    }
+  }
+]
+
+result = model.generate('What is the weather in Paris?', tools:)
+puts result.text
+```
+
+#### Tool call results
+
+Messages are passed to the model's chat template in the OpenAI format, so tool
+calls and their results are wired through the standard message schema: the
+assistant message carries a structured `tool_calls:` array, and the tool output
+is sent back as a `role: 'tool'` message.
+
+Pass `tools:` (and optionally `system:`) once when creating the context. They
+are remembered for all subsequent turns. When the model emits a tool call, it
+is parsed into `result.tool_calls` and stored in the conversation history in
+structured form automatically. Execute the calls and send each result back as
+a `role: 'tool'` message:
+
+```ruby
+context = model.init_context(tools:)
+
+result = context.generate('What is the weather in Paris?')
+result.tool_calls
+# => [{ name: 'get_weather', arguments: { 'location' => 'Paris' }, id: 'call_1' }]
+
+result.tool_calls.each do |call|
+  weather = get_weather(call[:arguments]['location'])
+
+  result = context.generate(
+    { role: 'tool', tool_call_id: call[:id], name: call[:name], content: weather.to_json }
+  )
+end
+
+puts result.text
+# => "The weather in Paris right now is 21°C."
+```
+
+The tool call markup is parsed by llama.cpp's chat parser, which derives the
+format automatically from the model's own chat template. Any model with a
+tool-capable template is supported. If no tool call is detected,
+`result.tool_calls` is empty and `result.text` contains the raw output.
+
+The context detects the edited history and automatically rolls the KV cache
+back to the common prefix, so only the changed suffix is re-processed.
+
+### Reasoning
+
+For models with reasoning support, pass `reasoning: true` to
+enable the model's reasoning phase. The reasoning block is parsed out of the
+output: `result.text` contains only the final answer and the reasoning is
+available separately:
+
+```ruby
+result = model.generate('Why is the sky blue?', reasoning: true)
+
+result.reasoning
+# => "Thinking Process:\n\n1. Analyze the request..."
+
+result.text
+# => "The sky appears blue because..."
+```
+
+Like `tools:`, the flag can also be set once per context via
+`model.init_context(reasoning: true)`. It defaults to off; `result.reasoning`
+is `nil` when reasoning is disabled or the model produced no reasoning block.
+Note that when streaming with a block, the raw reasoning tokens are yielded
+as they are generated.
 
 ### Chat
 

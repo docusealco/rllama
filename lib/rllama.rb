@@ -5,10 +5,11 @@ module Rllama
   autoload :Loader, 'rllama/loader'
   autoload :Context, 'rllama/context'
   autoload :Cpp, 'rllama/cpp'
+  autoload :Common, 'rllama/common'
   autoload :Cli, 'rllama/cli'
   autoload :VERSION, 'rllama/version'
 
-  Result = Struct.new(:text, :stats, keyword_init: true)
+  Result = Struct.new(:text, :reasoning, :tool_calls, :stats, keyword_init: true)
   Error = Class.new(StandardError)
 
   module_function

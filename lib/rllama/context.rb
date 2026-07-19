@@ -1,13 +1,20 @@
 # frozen_string_literal: true
 
 require 'etc'
+require 'json'
 
 module Rllama
   class Context
+    TOOL_CALL_ID_PREFIX = 'call_'
+    GRAMMAR_TYPE_TOOL_CALLS = 3
+
     attr_reader :messages, :n_ctx, :n_batch, :n_past
 
-    def initialize(model, embeddings: false, n_ctx: nil, n_batch: nil, n_threads: Etc.nprocessors)
+    def initialize(model, embeddings: false, n_ctx: nil, n_batch: nil, n_threads: Etc.nprocessors,
+                   system: nil, tools: nil, reasoning: false)
       @model = model
+      @tools = tools
+      @reasoning = reasoning
       @n_ctx = n_ctx
       @n_batch = n_batch
       @embeddings = embeddings
@@ -38,13 +45,32 @@ module Rllama
 
       raise Error, 'Failed to create the llama_context' if @pointer.null?
 
+      @n_ctx = Cpp.llama_n_ctx(@pointer)
+      @n_batch = Cpp.llama_n_batch(@pointer)
+
       @n_past = 0
+      @cache_tokens = []
+      @tool_call_count = 0
       @messages = []
+      @messages << { role: 'system', content: system } if system
+
+      prefill if !@embeddings && (system || tools)
     end
 
-    def generate(message, role: 'user', max_tokens: @n_ctx, temperature: 0.8, top_k: 40, top_p: 0.95, min_p: 0.05,
-                 seed: nil, system: nil)
-      @messages << { role: 'system', content: system } if system && @messages.empty?
+    def generate(message, role: 'user', max_tokens: @n_ctx, temperature: nil, top_k: nil, top_p: nil, min_p: nil,
+                 seed: nil, system: nil, tools: nil, reasoning: nil, &block)
+      temperature, top_k, top_p, min_p = resolve_sampling(temperature, top_k, top_p, min_p)
+
+      @tools = tools unless tools.nil?
+      @reasoning = reasoning unless reasoning.nil?
+
+      if system
+        if @messages.dig(0, :role).to_s == 'system'
+          @messages.first[:content] = system
+        else
+          @messages.unshift(role: 'system', content: system)
+        end
+      end
 
       if message.is_a?(Array)
         @messages.push(*message)
@@ -54,51 +80,19 @@ module Rllama
         @messages << { role: role, content: message }
       end
 
-      prompt_string = @model.build_chat_template(@messages)
+      applied = @model.apply_chat_template(@messages, tools: @tools, enable_thinking: @reasoning)
 
-      n_prompt_tokens = -Cpp.llama_tokenize(@model.vocab, prompt_string, prompt_string.bytesize, nil, 0, true, true)
+      decode_prompt(applied['prompt'])
 
-      raise Error, 'Prompt is too long.' if n_prompt_tokens.negative?
-
-      prompt_tokens_ptr = FFI::MemoryPointer.new(:int32, n_prompt_tokens)
-      tokens_written = Cpp.llama_tokenize(@model.vocab, prompt_string, prompt_string.bytesize, prompt_tokens_ptr,
-                                          n_prompt_tokens, true, true)
-
-      raise Error, 'Failed to tokenize prompt.' if tokens_written.negative?
-
-      new_token_count = tokens_written - @n_past
-
-      if new_token_count.positive?
-        new_tokens_ptr = prompt_tokens_ptr + (@n_past * FFI.type_size(:int32))
-
-        batch = Cpp.llama_batch_get_one(new_tokens_ptr, new_token_count)
-
-        raise Error, 'llama_decode failed.' if Cpp.llama_decode(@pointer, batch) != 0
-
-        @n_past = tokens_written
-      end
-
-      chain_params = Cpp.llama_sampler_chain_default_params
-      sampler_chain = Cpp.llama_sampler_chain_init(chain_params)
-
-      Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_min_p(min_p, 1)) if min_p
-      Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_top_k(top_k)) if top_k&.positive?
-      Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_top_p(top_p, 1)) if top_p && top_p < 1.0
-      if temperature&.positive?
-        Cpp.llama_sampler_chain_add(sampler_chain,
-                                    Cpp.llama_sampler_init_temp(temperature))
-      end
-
-      is_probabilistic = temperature&.positive? || top_k&.positive? || (top_p && top_p < 1.0) || !min_p.nil?
       rng_seed = seed || (Random.new_seed & 0xFFFFFFFF)
 
-      if is_probabilistic
-        Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_dist(rng_seed))
-      else
-        Cpp.llama_sampler_chain_add(sampler_chain, Cpp.llama_sampler_init_greedy)
-      end
+      sampler = Common.sampler_init(@model.pointer, sampler_params(temperature, top_k, top_p, min_p, rng_seed, applied))
+
+      stops = applied['additional_stops'].to_a.map(&:b)
+      max_stop = stops.map(&:bytesize).max || 0
 
       n_decoded = 0
+      n_yielded = 0
 
       generated_text = ''.b
 
@@ -111,7 +105,9 @@ module Rllama
       loop do
         break if n_decoded >= max_tokens
 
-        new_token_id = Cpp.llama_sampler_sample(sampler_chain, @pointer, -1)
+        new_token_id = Common.sampler_sample(sampler, @pointer)
+
+        Common.sampler_accept(sampler, new_token_id)
 
         break if Cpp.llama_vocab_is_eog(@model.vocab, new_token_id)
 
@@ -119,10 +115,10 @@ module Rllama
         n_chars = Cpp.llama_token_to_piece(@model.vocab, new_token_id, buffer, buffer.size, 0, true)
 
         if n_chars >= 0
-          piece_bytes = buffer.read_string(n_chars)
-          utf8_piece = piece_bytes.force_encoding(Encoding::UTF_8)
-          generated_text << utf8_piece
-          yield utf8_piece if block_given?
+          stop_at, n_yielded = emit_piece(generated_text, buffer.read_string(n_chars), stops, max_stop, n_yielded,
+                                          &block)
+
+          break if stop_at
         end
 
         token_ptr = FFI::MemoryPointer.new(:int32, 1).put_int32(0, new_token_id)
@@ -132,8 +128,15 @@ module Rllama
         raise Error, 'llama_decode failed.' if Cpp.llama_decode(@pointer, batch) != 0
 
         @n_past += 1
+        @cache_tokens << new_token_id
         n_decoded += 1
       end
+
+      if block_given? && n_yielded < generated_text.bytesize
+        yield generated_text.byteslice(n_yielded..).force_encoding(Encoding::UTF_8)
+      end
+
+      generated_text.force_encoding(Encoding::UTF_8)
 
       end_time = Time.now
 
@@ -141,15 +144,38 @@ module Rllama
 
       tps = n_decoded.positive? && duration.positive? ? n_decoded / duration : 0
 
-      Cpp.llama_sampler_free(sampler_chain)
+      Common.sampler_free(sampler)
+
+      text = generated_text
+      reasoning = nil
+      tool_calls = []
+
+      if @tools || @reasoning
+        parsed = Common.chat_parse(generated_text, applied, reasoning: @reasoning)
+
+        reasoning = parsed['reasoning_content']
+        reasoning = nil if reasoning&.empty?
+        tool_calls = extract_tool_calls(parsed, assistant_message) if @tools
+
+        if @reasoning && tool_calls.empty?
+          text = parsed['content'].to_s
+          assistant_message[:content] = text
+        end
+      end
 
       Result.new(
-        text: generated_text,
+        text:,
+        reasoning:,
+        tool_calls:,
         stats: {
           duration:,
           tokens_generated: n_decoded,
           tps:,
-          seed: rng_seed
+          seed: rng_seed,
+          temperature:,
+          top_k:,
+          top_p:,
+          min_p:
         }
       )
     end
@@ -246,6 +272,149 @@ module Rllama
 
     def close
       Cpp.llama_free(@pointer)
+    end
+
+    def prefill
+      decode_prompt(@model.build_chat_template(@messages, tools: @tools, add_generation_prompt: false,
+                                                          enable_thinking: @reasoning))
+    rescue StandardError
+      nil
+    end
+
+    def extract_tool_calls(parsed, assistant_message)
+      calls = (parsed['tool_calls'] || []).map do |call|
+        id = call['id'].to_s
+        id = "#{TOOL_CALL_ID_PREFIX}#{@tool_call_count += 1}" if id.empty?
+
+        arguments = begin
+          JSON.parse(call.dig('function', 'arguments').to_s)
+        rescue JSON::ParserError
+          {}
+        end
+
+        { name: call.dig('function', 'name'), arguments:, id: }
+      end
+
+      return [] if calls.empty?
+
+      assistant_message.replace(
+        role: 'assistant',
+        content: nil,
+        tool_calls: calls.map do |call|
+          { type: 'function', id: call[:id],
+            function: { name: call[:name], arguments: call[:arguments].to_json } }
+        end
+      )
+
+      calls
+    end
+
+    def decode_prompt(prompt_string)
+      n_prompt_tokens = -Cpp.llama_tokenize(@model.vocab, prompt_string, prompt_string.bytesize, nil, 0, true, true)
+
+      raise Error, 'Prompt is too long.' if n_prompt_tokens.negative?
+
+      prompt_tokens_ptr = FFI::MemoryPointer.new(:int32, n_prompt_tokens)
+      tokens_written = Cpp.llama_tokenize(@model.vocab, prompt_string, prompt_string.bytesize, prompt_tokens_ptr,
+                                          n_prompt_tokens, true, true)
+
+      raise Error, 'Failed to tokenize prompt.' if tokens_written.negative?
+
+      prompt_tokens = prompt_tokens_ptr.read_array_of_int32(tokens_written)
+
+      common = common_prefix_length(prompt_tokens)
+
+      if common < @cache_tokens.length
+        memory = Cpp.llama_get_memory(@pointer)
+
+        if memory.null? || !Cpp.llama_memory_seq_rm(memory, 0, common, -1)
+          Cpp.llama_memory_clear(memory, true) unless memory.null?
+
+          common = 0
+        end
+
+        @n_past = common
+      end
+
+      while tokens_written > @n_past
+        n_eval = [tokens_written - @n_past, @n_batch].min
+
+        new_tokens_ptr = prompt_tokens_ptr + (@n_past * FFI.type_size(:int32))
+
+        batch = Cpp.llama_batch_get_one(new_tokens_ptr, n_eval)
+
+        raise Error, 'llama_decode failed.' if Cpp.llama_decode(@pointer, batch) != 0
+
+        @n_past += n_eval
+      end
+
+      @cache_tokens = prompt_tokens
+    end
+
+    def common_prefix_length(tokens)
+      limit = [@cache_tokens.length, tokens.length - 1].min
+
+      common = 0
+      common += 1 while common < limit && @cache_tokens[common] == tokens[common]
+
+      common
+    end
+
+    def sampler_params(temperature, top_k, top_p, min_p, seed, applied)
+      params = {
+        temp: temperature || 0.0,
+        top_k: top_k&.positive? ? top_k : 0,
+        top_p: top_p || 1.0,
+        min_p: min_p || 0.0,
+        seed:
+      }
+
+      grammar = applied['grammar'].to_s
+
+      unless grammar.empty?
+        params.merge!(grammar:, grammar_type: GRAMMAR_TYPE_TOOL_CALLS,
+                      grammar_lazy: applied['grammar_lazy'],
+                      grammar_triggers: applied['grammar_triggers'],
+                      generation_prompt: applied['generation_prompt'])
+      end
+
+      params
+    end
+
+    def emit_piece(text, piece, stops, max_stop, n_yielded, &block)
+      tail_from = [text.bytesize - max_stop + 1, 0].max
+      text << piece
+
+      stop_at = max_stop.positive? ? stops.filter_map { |stop| text.index(stop, tail_from) }.min : nil
+      text.slice!(stop_at..) if stop_at
+
+      if block
+        safe = text.bytesize - (stop_at ? 0 : stop_holdback(text, stops))
+
+        if safe > n_yielded
+          yield(text.byteslice(n_yielded, safe - n_yielded).force_encoding(Encoding::UTF_8))
+          n_yielded = safe
+        end
+      end
+
+      [stop_at, n_yielded]
+    end
+
+    def stop_holdback(text, stops)
+      stops.map do |stop|
+        (stop.bytesize - 1).downto(1).find { |n| text.end_with?(stop.byteslice(0, n)) } || 0
+      end.max || 0
+    end
+
+    def resolve_sampling(temperature, top_k, top_p, min_p)
+      defaults = @model.sampling_defaults
+
+      [
+        temperature.nil? ? defaults[:temperature] : temperature,
+        top_k.nil? ? defaults[:top_k] : top_k,
+        top_p.nil? ? defaults[:top_p] : top_p,
+        min_p.nil? ? defaults[:min_p] : min_p
+      ]
     end
 
     def norm(vec)
